@@ -1,0 +1,79 @@
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DOC_PARSE_BASE_URL: ${{ vars.DOC_PARSE_BASE_URL }}
+      CORS_FETCH_BASE_URL: ${{ vars.CORS_FETCH_BASE_URL }}
+      SEARXNG_BASE_URL: ${{ vars.SEARXNG_BASE_URL }}
+      DEXIE_DB_URL: ${{ vars.DEXIE_DB_URL }}
+      LITELLM_BASE_URL: ${{ vars.LITELLM_BASE_URL }}
+      BUDGET_BASE_URL: ${{ vars.BUDGET_BASE_URL }}
+      SYNC_SERVICE_PRICE: ${{ vars.SYNC_SERVICE_PRICE }}
+      SYNC_SERVICE_PRICE_USD: ${{ vars.SYNC_SERVICE_PRICE_USD }}
+      USD_TO_CNY_RATE: ${{ vars.USD_TO_CNY_RATE }}
+      STRIPE_FEE: ${{ vars.STRIPE_FEE }}
+      PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate .env.local
+        run: |
+          : > .env.local
+          for key in \
+            DOC_PARSE_BASE_URL \
+            CORS_FETCH_BASE_URL \
+            SEARXNG_BASE_URL \
+            DEXIE_DB_URL \
+            LITELLM_BASE_URL \
+            BUDGET_BASE_URL \
+            SYNC_SERVICE_PRICE \
+            SYNC_SERVICE_PRICE_USD \
+            USD_TO_CNY_RATE \
+            STRIPE_FEE
+          do
+            value="${!key}"
+            if [ -n "$value" ]; then
+              printf "%s=%s\n" "$key" "$value" >> .env.local
+            fi
+          done
+
+      - name: Build PWA
+        run: pnpm build -m pwa
+
+      - name: Validate Pages project name
+        run: |
+          if [ -z "$PAGES_PROJECT_NAME" ]; then
+            echo "CLOUDFLARE_PAGES_PROJECT_NAME is not set"
+            exit 1
+          fi
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist/pwa --project-name ${{ env.PAGES_PROJECT_NAME }} --branch master --commit-hash ${{ github.sha }} --commit-message "${{ github.event.head_commit.message }}"
